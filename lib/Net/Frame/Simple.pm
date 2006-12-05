@@ -1,11 +1,11 @@
 #
-# $Id: Simple.pm,v 1.5 2006/12/03 16:24:46 gomor Exp $
+# $Id: Simple.pm,v 1.7 2006/12/05 20:37:52 gomor Exp $
 #
 package Net::Frame::Simple;
 use warnings;
 use strict;
 
-our $VERSION = '1.00_01';
+our $VERSION = '1.00_02';
 
 require Class::Gomor::Array;
 our @ISA = qw(Class::Gomor::Array);
@@ -49,6 +49,16 @@ sub new {
 
    $self->[$__raw] ? $self->unpack : $self->pack;
    $self;
+}
+
+sub newFromDump {
+   my $self = shift;
+   my ($h) = @_;
+   $self->new(
+      timestamp  => $h->{timestamp},
+      firstLayer => $h->{firstLayer},
+      raw        => $h->{raw},
+   );
 }
 
 # If there are multiple layers of the same type, the upper will be kept
@@ -187,7 +197,7 @@ sub computeChecksums {
       }
       elsif (exists $self->[$__ref]->{ICMPv4} && $icmp4Type) {
          $self->[$__ref]->{ICMPv4}->computeChecksums({
-            payload => $icmp4Type,
+            icmpType => $icmp4Type,
          });
       }
    }
@@ -244,8 +254,18 @@ sub _getPadding {
 
    my $pLen    = ($rawLength > $tLen) ? ($rawLength - $tLen) : 0;
    my $padding = substr($self->[$__raw], $tLen, $pLen);
+
    $self->[$__padding] = $padding;
-   $last->payload(undef);
+
+   # Now, split padding between true padding and true payload
+   my $payloadLength = length($last->payload);
+   if ($payloadLength > $pLen) {
+      my $payload = substr($last->payload, 0, ($payloadLength - $pLen));
+      $last->payload($payload);
+   }
+   else {
+      $last->payload(undef);
+   }
 }
 
 sub send {
@@ -296,7 +316,16 @@ sub _recv {
    for my $this ($oDump->getFramesFor($self)) {
       next unless $this->[$__timestamp] ge $self->[$__timestamp];
 
-      if (exists $this->[$__ref]->{$layer->layer}) {
+      # We must put ICMPv4 before, because the other will 
+      # always match for UDP.
+      if (exists $this->[$__ref]->{ICMPv4}
+      &&  (exists $this->[$__ref]->{UDP} || exists $this->[$__ref]->{TCP})) {
+         if (exists $this->[$__ref]->{$layer->layer}) {
+            return $this
+               if $this->[$__ref]->{$layer->layer}->getKey eq $layer->getKey;
+         }
+      }
+      elsif (exists $this->[$__ref]->{$layer->layer}) {
          return $this if $layer->match($this->[$__ref]->{$layer->layer});
       }
    }
@@ -314,11 +343,7 @@ sub recv {
    # Is there anything waiting ?
    my $h = $oDump->next or return undef;
 
-   my $oSimple = Net::Frame::Simple->new(
-      raw        => $h->{raw},
-      firstLayer => $h->{firstLayer},
-      timestamp  => $h->{timestamp},
-   );
+   my $oSimple = Net::Frame::Simple->newFromDump($h);
    $oDump->store($oSimple);
 
    if (my $reply = $self->_recv($oDump)) {
@@ -382,195 +407,17 @@ Net::Frame::Simple - frame crafting made easy
 
 =head1 SYNOPSIS
 
-   require Net::Packet::Frame;
-
-   # Because we passed a layer 3 object, a Net::Packet::DescL3 object 
-   # will be created automatically, by default. See Net::Packet::Env 
-   # regarding changing this behaviour. Same for Net::Packet::Dump.
-   my $frame = Net::Packet::Frame->new(
-      l3 => $ipv4,  # Net::Packet::IPv4 object
-      l4 => $tcp,   # Net::Packet::TCP object
-                    # (here, a SYN request, for example)
-   );
-
-   # Without retries
-   $frame->send;
-   sleep(3);
-   if (my $reply = $frame->recv) {
-      print $reply->l3->print."\n";
-      print $reply->l4->print."\n";
-   }
-
-   # Or with retries
-   for (1..3) {
-      $frame->reSend;
-
-      until ($Env->dump->timeout) {
-         if (my $reply = $frame->recv) {
-            print $reply->l3->print."\n";
-            print $reply->l4->print."\n";
-            last;
-         }
-      }
-   }
-
 =head1 DESCRIPTION
-
-In B<Net::Packet>, each sent and/or received frame is parsed and converted into a B<Net::Packet::Frame> object. Basically, it encapsulates various layers (2, 3, 4 and 7) into an object, making it easy to get or set information about it.
-
-When you create a frame object, a B<Net::Packet::Desc> object is created if none is found in the default B<$Env> object (from B<Net::Packet> module), and a B<Net::Packet::Dump> object is also created if none is found in this same B<$Env> object. You can change this beheaviour, see B<Net::Packet::Env>.
-
-Two B<new> invocation method exist, one with attributes passing, another with B<raw> attribute. This second method is usually used internally, in order to unpack received frame into all corresponding layers.
 
 =head1 ATTRIBUTES
 
 =over 4
-
-=item B<env>
-
-Stores the B<Net::Packet::Env> object. The default is to use B<$Env> from B<Net::Packet>. So, you can send/recv frames to/from different environements.
-
-=item B<raw>
-
-Pass this attribute when you want to decode a raw string captured from network. Usually used internally.
-
-=item B<padding>
-
-In Ethernet world, a frame should be at least 60 bytes in length. So when you send frames at layer 2, a padding is added in order to achieve this length, avoiding a local memory leak to network. Also, when you receive a frame from network, this attribute is filled with what have been used to pad it. This padding feature currently works for IPv4 and ARP frames.
-
-=item B<l2>
-
-Stores a layer 2 object. See B<Net::Packet> for layer 2 classes hierarchy.
-
-=item B<l3>
-
-Stores a layer 3 object. See B<Net::Packet> for layer 3 classes hierarchy.
-
-=item B<l4>
-
-Stores a layer 4 object. See B<Net::Packet> for layer 4 classes hierarchy.
-
-=item B<l7>
-
-Stores a layer 7 object. See B<Net::Packet::Layer7>.
-
-=item B<reply>
-
-When B<recv> method has been called on a frame object, and a corresponding reply has been catched, a pointer is stored in this attribute.
-
-=item B<timestamp>
-
-When a frame is packed/unpacked, the happening time is stored here.
-
-=item B<encapsulate>
-
-Give the type of the first encapsulated layer. It is a requirement to parse a user provided raw string.
 
 =back
 
 =head1 METHODS
 
 =over 4
-
-=item B<new>
-
-Object constructor. If a B<$Env->desc> object does not exists, one is created by analyzing attributes (so, either one of B<Net::Packet::DescL2>, B<Net::Packet::DescL3>. B<Net::Packet::DescL4> cannot be created automatically for now). The same behaviour is true for B<$Env->dump> object. You can change this default creation behaviour, see B<Net::Packet::Env>. Default values:
-
-timestamp: gettimeofday(),
-
-env:       $Env
-
-=item B<getLengthFromL7>
-
-=item B<getLengthFromL4>
-
-=item B<getLengthFromL3>
-
-=item B<getLengthFromL2>
-
-Returns the raw length in bytes from specified layer.
-
-=item B<getLength>
-
-Alias for B<getLengthFromL3>.
-
-=item B<unpack>
-
-Unpacks the raw string from network into various layers. Returns 1 on success, undef on failure.
-
-=item B<pack>
-
-Packs various layers into the raw string to send to network. Returns 1 on success, undef on failure.
-
-=item B<send>
-
-On the first send invocation in your program, the previously created B<Net::Packet::Dump> object is started (if available). That is, packet capturing is run. The B<timestamp> attribute is set to the sending time. The B<env> attribute is used to know where to send this frame.
-
-=item B<reSend>
-
-Will call B<send> method if no frame has been B<recv>'d, that is the B<reply> attribute is undef.
-
-=item B<getFilter>
-
-Will return a string which is a pcap filter, and corresponding to what you should receive compared with the frame request.
-
-=item B<recv>
-
-Searches B<framesSorted> or B<frames> from B<Net::Packet::Dump> for a matching response. If a reply has already been received (that is B<reply> attribute is already set), undef is returned. It no reply is received, return undef, else the B<Net::Packet::Frame> response.
-
-=item B<print>
-
-Just returns a string in a human readable format describing attributes found in the layer.
-
-=item B<dump>
-
-Just returns a string in hexadecimal format which is how the layer appears on the network.
-
-=item B<isEth>
-
-=item B<isRaw>
-
-=item B<isNull>
-
-=item B<isSll>
-
-=item B<isPpp>
-
-=item B<isArp>
-
-=item B<isIpv4>
-
-=item B<isIpv6>
-
-=item B<isIp> - either IPv4 or IPv6
-
-=item B<isPpplcp>
-
-=item B<isVlan>
-
-=item B<isPppoe>
-
-=item B<isLlc>
-
-=item B<isTcp>
-
-=item B<isUdp>
-
-=item B<isIcmpv4>
-
-=item B<isIcmp> - currently only ICMPv4
-
-=item B<isCdp>
-
-=item B<isStp>
-
-=item B<isOspf>
-
-=item B<isIgmpv4>
-
-=item B<is7>
-
-Returns 1 if the B<Net::Packet::Frame> is of specified layer, 0 otherwise.
 
 =back
 
