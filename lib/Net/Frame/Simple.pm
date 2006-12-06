@@ -1,11 +1,11 @@
 #
-# $Id: Simple.pm,v 1.7 2006/12/05 20:37:52 gomor Exp $
+# $Id: Simple.pm,v 1.8 2006/12/06 21:28:05 gomor Exp $
 #
 package Net::Frame::Simple;
 use warnings;
 use strict;
 
-our $VERSION = '1.00_02';
+our $VERSION = '1.00_03';
 
 require Class::Gomor::Array;
 our @ISA = qw(Class::Gomor::Array);
@@ -131,13 +131,6 @@ sub unpack {
 sub computeLengths {
    my $self = shift;
 
-   my $params;
-   for my $l (@{$self->[$__layers]}) {
-      do { $params->{ICMPv4_Type} = $l; next } if $l->layer =~ /^ICMPv4./;
-   }
-
-   my $icmp4Type = $params->{ICMPv4_Type};
-
    if (exists $self->[$__ref]->{IPv4}) {
       my $ip4 = $self->[$__ref]->{IPv4};
       if (exists $self->[$__ref]->{TCP}) {
@@ -154,10 +147,10 @@ sub computeLengths {
             payloadLength => $udp->getLength + $udp->getPayloadLength,
          });
       }
-      elsif (exists $self->[$__ref]->{ICMPv4} && $icmp4Type) {
+      elsif (exists $self->[$__ref]->{ICMPv4}) {
          my $icmp4 = $self->[$__ref]->{ICMPv4};
          $ip4->computeLengths({
-            payloadLength => $icmp4->getLength + $icmp4Type->getLength,
+            payloadLength => $icmp4->getLength,
          });
       }
    }
@@ -167,13 +160,6 @@ sub computeLengths {
 
 sub computeChecksums {
    my $self = shift;
-
-   my $params;
-   for my $l (@{$self->[$__layers]}) {
-      do { $params->{ICMPv4_Type} = $l; next } if $l->layer =~ /^ICMPv4./;
-   }
-
-   my $icmp4Type = $params->{ICMPv4_Type};
 
    if (exists $self->[$__ref]->{IPv4}) {
       my $ip4 = $self->[$__ref]->{IPv4};
@@ -195,10 +181,8 @@ sub computeChecksums {
             dst  => $ip4->dst,
          });
       }
-      elsif (exists $self->[$__ref]->{ICMPv4} && $icmp4Type) {
-         $self->[$__ref]->{ICMPv4}->computeChecksums({
-            icmpType => $icmp4Type,
-         });
+      elsif (exists $self->[$__ref]->{ICMPv4}) {
+         $self->[$__ref]->{ICMPv4}->computeChecksums;
       }
    }
 
@@ -418,6 +402,32 @@ Net::Frame::Simple - frame crafting made easy
 =head1 METHODS
 
 =over 4
+
+=item B<new>
+
+=item B<newFromDump>
+
+=item B<computeLengths>
+
+=item B<computeChecksums>
+
+=item B<pack>
+
+=item B<unpack>
+
+=item B<getKey>
+
+=item B<getKeyReverse>
+
+=item B<recv>
+
+=item B<send>
+
+=item B<reSend>
+
+=item B<print>
+
+=item B<dump>
 
 =back
 
