@@ -1,11 +1,11 @@
 #
-# $Id: Simple.pm,v 1.8 2006/12/06 21:28:05 gomor Exp $
+# $Id: Simple.pm,v 1.10 2006/12/09 18:37:36 gomor Exp $
 #
 package Net::Frame::Simple;
 use warnings;
 use strict;
 
-our $VERSION = '1.00_03';
+our $VERSION = '1.00';
 
 require Class::Gomor::Array;
 our @ISA = qw(Class::Gomor::Array);
@@ -42,7 +42,7 @@ sub _gettimeofday {
 sub new {
    my $self = shift->SUPER::new(
       timestamp  => _gettimeofday(),
-      firstLayer => NP_LAYER_UNKNOWN,
+      firstLayer => NF_LAYER_UNKNOWN,
       layers     => [],
       @_,
    );
@@ -73,7 +73,7 @@ sub unpack {
 
    my $encapsulate = $self->[$__firstLayer];
 
-   if ($encapsulate eq NP_LAYER_UNKNOWN) {
+   if ($encapsulate eq NF_LAYER_UNKNOWN) {
       print("Unable to unpack frame from this layer type.\n");
       return undef;
    }
@@ -83,20 +83,30 @@ sub unpack {
    my $raw       = $self->[$__raw];
    my $rawLength = length($raw);
    my $oRaw      = $raw;
+   my $prevLayer;
    # No more than a thousand nested layers, maybe should be a parameter
    for (1..1000) {
       last unless $raw;
 
-      my $layer  = 'Net::Frame::'.$encapsulate;
+      my $layer = 'Net::Frame::'.$encapsulate;
       (my $module = $layer) =~ s/::/\//g;
       eval { require "$module.pm" };
       if ($@) {
          print("*** Net::Frame::$encapsulate module not found.\n".
                "*** Either install it (if avail), or implement it.\n".
                "*** You can also send the pcap file to perl\@gomor.org.\n");
+               # XXX: use debug feature from Class::Gomor
+               #"*** You can also send the pcap file to perl\@gomor.org.\n".
+               #"*** ERROR: $@\n");
+
+         if ($prevLayer) {
+            $prevLayer->nextLayer(NF_LAYER_NOT_AVAILABLE);
+         }
+
          last;
       }
-      my $l = $layer->new(raw => $raw)->unpack;
+      my $l = $layer->new(raw => $raw)->unpack
+         or last;
 
       $encapsulate = $l->encapsulate;
       $raw         = $l->payload;
@@ -107,13 +117,14 @@ sub unpack {
 
       last unless $encapsulate;
 
-      if ($encapsulate eq NP_LAYER_UNKNOWN) {
+      if ($encapsulate eq NF_LAYER_UNKNOWN) {
          print("Unable to unpack next layer, not yet implemented in layer: ".
                "$n:@{[$l->layer]}\n");
          last;
       }
 
-      $oRaw = $raw;
+      $prevLayer = $l;
+      $oRaw      = $raw;
    }
 
    if (@layers > 0) {
@@ -220,6 +231,12 @@ sub _getPadding {
    # Last layer has no payload, so no padding
    return unless $last->payload;
 
+   # If last layer has unknown layer payload, we do not 
+   # try to get padding
+   if ($last->nextLayer eq NF_LAYER_NOT_AVAILABLE) {
+      return;
+   }
+
    my $tLen = 0;
    for my $l (@{$self->[$__layers]}) {
       if ($l->layer eq 'IPv4') {
@@ -258,7 +275,7 @@ sub send {
    $oWrite->send($self->[$__raw]);
 }
 
-sub reSend { my $self = shift; $self->send unless $self->[$__reply] }
+sub reSend { my $self = shift; $self->send(shift()) unless $self->[$__reply] }
 
 sub _searchCanMatchLayer {
    my $self = shift;
@@ -369,16 +386,11 @@ sub print {
 sub dump {
    my $self = shift;
 
-   my $str = '';
-   for (@{$self->[$__layers]}) {
-      $str .= $_->dump."\n";
-   }
+   my $raw = '';
+   $raw .= $_->raw for @{$self->[$__layers]};
+   $raw .= $self->[$__padding] if $self->[$__padding];
 
-   if ($self->[$__padding]) {
-      $str .= 'Padding: '.CORE::unpack('H*', $self->[$__padding])."\n";
-   }
-
-   $str;
+   CORE::unpack('H*', $raw);
 }
 
 1;
@@ -391,11 +403,93 @@ Net::Frame::Simple - frame crafting made easy
 
 =head1 SYNOPSIS
 
+   # We build a TCP SYN
+   my $src    = '192.168.0.10';
+   my $target = '192.168.0.1';
+   my $port   = 22;
+
+   use Net::Frame::Simple;
+   use Net::Frame::IPv4;
+   use Net::Frame::TCP;
+
+   my $ip4 = Net::Frame::IPv4->new(
+      src => $src,
+      dst => $target,
+   );
+   my $tcp = Net::Frame::TCP->new(
+      dst     => $port,
+      options => "\x02\x04\x54\x0b",
+      payload => 'test',
+   );
+
+   my $oSimple = Net::Frame::Simple->new(
+      layers => [ $ip4, $tcp ],
+   );
+
+   # Now, the frame is ready to be send to the network
+   # We open a sender object, and a retriever object
+   use Net::Write::Layer3;
+   use Net::Frame::Dump::Online;
+
+   my $oWrite = Net::Write::Layer3->new(dst => $target);
+   my $oDump  = Net::Frame::Dump::Online->new(dev => $oDevice->dev);
+   $oDump->start;
+   $oWrite->open;
+
+   # We send the frame
+   $oSimple->send($oWrite);
+
+   # And finally, waiting for the response
+   until ($oDump->timeout) {
+      if (my $recv = $oSimple->recv($oDump)) {
+         print "RECV:\n".$recv->print."\n";
+         last;
+      }
+   }
+
+   $oWrite->close;
+   $oDump->stop;
+
 =head1 DESCRIPTION
+
+This module is part of B<Net::Frame> frame crafting framework. It is totally optional, but can make playing with the network far easier.
+
+Basically, it hides the complexity of frame forging, sending, and receiving, by providing helper methods, which will analyze internally how to assemble frames and find responses to probes.
+
+For example, it will take care of computing lengths and checksums, and matching a response frame to the requesting frame.
 
 =head1 ATTRIBUTES
 
 =over 4
+
+=item B<raw>
+
+Where the packed frame will be stored, or used to unpack a raw string taken from the network (or elsewhere).
+
+=item B<timestamp>
+
+The frame timestamp.
+
+=item B<firstLayer>
+
+We cannot know by which layer a frame begins, so this tells how to start unpacking a raw data.
+
+=item B<padding>
+
+Sometimes, frames are padded to achieve 60 bytes in length. The padding will be stored here, or if you craft a frame, you can manually add your own padding.
+
+=item B<reply>
+
+When the B<recv> method is called, and a corresponding reply has been found, it is stored here.
+
+=item B<layers>
+
+This one is an arrayref. It will store all layers to use within the B<Net::Frame::Simple> object.
+
+=item B<ref>
+
+This is a hashref that stores all layers. The key is the layer type (example: TCP: B<$oSimple->ref->{TCP}>). If the frame contains multiple layers of the same type, only the one found at upper level will be kept (in fact, the latest analyzed one, aka LIFO).
+
 
 =back
 
@@ -403,33 +497,61 @@ Net::Frame::Simple - frame crafting made easy
 
 =over 4
 
-=item B<new>
+=item B<new> (hash)
 
-=item B<newFromDump>
+Object constructor. You can pass attributes in a hash as a parameter.
+
+=item B<newFromDump> (hashref)
+
+When B<Net::Frame::Dump> B<next> method is called, and there is a frame waiting, it returns a hashref with specific values. You can directly use it as a parameter for this method, which will create a new B<Net::Frame::Simple> object.
 
 =item B<computeLengths>
 
+This one hides the manual hassle of calling B<computeLengths> method for each layers. It takes no parameter, it will know internally what to do.
+
 =item B<computeChecksums>
+
+Same as above, but for checksums. you MUST call the previous one before this one.
 
 =item B<pack>
 
+Will pack all layers to to B<raw> attribute, ready to be sent to the network.
+
 =item B<unpack>
+
+Will unpack a raw string from the B<raw> attribute into respective layers.
 
 =item B<getKey>
 
 =item B<getKeyReverse>
 
-=item B<recv>
+These two methods are basically used to increase the speed when using B<recv> method.
 
-=item B<send>
+=item B<recv> (Net::Frame::Dump object)
 
-=item B<reSend>
+When you want to search for the response of your probe, you call it by specifying from which B<Net::Frame::Dump> object to search. It then returns a B<Net::Frame::Simple> object if a match is found, or undef if not.
+
+=item B<send> (Net::Write object)
+
+Will send to the B<Net::Write> object the raw string describing the B<Net::Frame::Simple> object.
+
+=item B<reSend> (Net::Write object)
+
+You can also B<reSend> the frame, it will only rewrite it to the network if no B<reply> has already been found.
 
 =item B<print>
 
+Prints all layers in human readable format.
+
 =item B<dump>
 
+Dumps the B<raw> string in hexadecimal format.
+
 =back
+
+=head1 SEE ALSO
+
+L<Net::Write>, L<Net::Frame::Dump>
 
 =head1 AUTHOR
 
