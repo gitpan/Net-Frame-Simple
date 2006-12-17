@@ -1,5 +1,9 @@
 Revision history for Perl extension Net::Frame::Simple.
 
+1.01 Sun Dec 17 17:30:19 CET 2006
+   - UPDATE: all layers moved to Net::Frame::Layer::* namespace
+   - new: support for IPv6 layer (computeLengths(), computeChecksums())
+
 1.00 Sat Dec  9 19:38:13 CET 2006
    - first public release
 

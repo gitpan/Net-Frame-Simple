@@ -1,11 +1,11 @@
 #
-# $Id: Simple.pm,v 1.10 2006/12/09 18:37:36 gomor Exp $
+# $Id: Simple.pm,v 1.11 2006/12/17 16:30:13 gomor Exp $
 #
 package Net::Frame::Simple;
 use warnings;
 use strict;
 
-our $VERSION = '1.00';
+our $VERSION = '1.01';
 
 require Class::Gomor::Array;
 our @ISA = qw(Class::Gomor::Array);
@@ -88,11 +88,11 @@ sub unpack {
    for (1..1000) {
       last unless $raw;
 
-      my $layer = 'Net::Frame::'.$encapsulate;
+      my $layer = 'Net::Frame::Layer::'.$encapsulate;
       (my $module = $layer) =~ s/::/\//g;
       eval { require "$module.pm" };
       if ($@) {
-         print("*** Net::Frame::$encapsulate module not found.\n".
+         print("*** Net::Frame::Layer::$encapsulate module not found.\n".
                "*** Either install it (if avail), or implement it.\n".
                "*** You can also send the pcap file to perl\@gomor.org.\n");
                # XXX: use debug feature from Class::Gomor
@@ -142,25 +142,25 @@ sub unpack {
 sub computeLengths {
    my $self = shift;
 
-   if (exists $self->[$__ref]->{IPv4}) {
-      my $ip4 = $self->[$__ref]->{IPv4};
+   if (exists $self->[$__ref]->{IPv4} || exists $self->[$__ref]->{IPv6}) {
+      my $ip = $self->[$__ref]->{IPv4} || $self->[$__ref]->{IPv6};
       if (exists $self->[$__ref]->{TCP}) {
          my $tcp = $self->[$__ref]->{TCP};
          $tcp->computeLengths;
-         $ip4->computeLengths({
+         $ip->computeLengths({
             payloadLength => $tcp->getLength + $tcp->getPayloadLength,
          });
       }
       elsif (exists $self->[$__ref]->{UDP}) {
          my $udp = $self->[$__ref]->{UDP};
          $udp->computeLengths;
-         $ip4->computeLengths({
+         $ip->computeLengths({
             payloadLength => $udp->getLength + $udp->getPayloadLength,
          });
       }
       elsif (exists $self->[$__ref]->{ICMPv4}) {
          my $icmp4 = $self->[$__ref]->{ICMPv4};
-         $ip4->computeLengths({
+         $ip->computeLengths({
             payloadLength => $icmp4->getLength,
          });
       }
@@ -172,24 +172,24 @@ sub computeLengths {
 sub computeChecksums {
    my $self = shift;
 
-   if (exists $self->[$__ref]->{IPv4}) {
-      my $ip4 = $self->[$__ref]->{IPv4};
+   if (exists $self->[$__ref]->{IPv4} || exists $self->[$__ref]->{IPv6}) {
+      my $ip = $self->[$__ref]->{IPv4} || $self->[$__ref]->{IPv6};
       if (exists $self->[$__ref]->{ETH}) {
-         $ip4->computeChecksums;
+         $ip->computeChecksums;
       }
 
       if (exists $self->[$__ref]->{TCP}) {
          $self->[$__ref]->{TCP}->computeChecksums({
-            type => 'IPv4',
-            src  => $ip4->src,
-            dst  => $ip4->dst,
+            type => $ip->layer,
+            src  => $ip->src,
+            dst  => $ip->dst,
          });
       }
       elsif (exists $self->[$__ref]->{UDP}) {
          $self->[$__ref]->{UDP}->computeChecksums({
-            type => 'IPv4',
-            src  => $ip4->src,
-            dst  => $ip4->dst,
+            type => $ip->layer,
+            src  => $ip->src,
+            dst  => $ip->dst,
          });
       }
       elsif (exists $self->[$__ref]->{ICMPv4}) {
@@ -409,14 +409,14 @@ Net::Frame::Simple - frame crafting made easy
    my $port   = 22;
 
    use Net::Frame::Simple;
-   use Net::Frame::IPv4;
-   use Net::Frame::TCP;
+   use Net::Frame::Layer::IPv4;
+   use Net::Frame::Layer::TCP;
 
-   my $ip4 = Net::Frame::IPv4->new(
+   my $ip4 = Net::Frame::Layer::IPv4->new(
       src => $src,
       dst => $target,
    );
-   my $tcp = Net::Frame::TCP->new(
+   my $tcp = Net::Frame::Layer::TCP->new(
       dst     => $port,
       options => "\x02\x04\x54\x0b",
       payload => 'test',
@@ -488,7 +488,7 @@ This one is an arrayref. It will store all layers to use within the B<Net::Frame
 
 =item B<ref>
 
-This is a hashref that stores all layers. The key is the layer type (example: TCP: B<$oSimple->ref->{TCP}>). If the frame contains multiple layers of the same type, only the one found at upper level will be kept (in fact, the latest analyzed one, aka LIFO).
+This is a hashref that stores all layers. The key is the layer type (example: TCP: $oSimple->ref->{TCP}). If the frame contains multiple layers of the same type, only the one found at upper level will be kept (in fact, the latest analyzed one, aka LIFO).
 
 
 =back
@@ -499,7 +499,7 @@ This is a hashref that stores all layers. The key is the layer type (example: TC
 
 =item B<new> (hash)
 
-Object constructor. You can pass attributes in a hash as a parameter.
+Object constructor. You can pass attributes in a hash as a parameter. Also note that when you call it with B<layers> attribute set, it will automatically call B<computeLengths>, B<computeChecksums> and B<pack> for you. And when you pass B<raw> attribute, it will call B<unpack> for you too, building layers and storing them in B<layers> attribute.
 
 =item B<newFromDump> (hashref)
 

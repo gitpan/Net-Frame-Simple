@@ -7,14 +7,14 @@ my $target = '192.168.0.1';
 my $port   = 22;
 
 use Net::Frame::Simple;
-use Net::Frame::IPv4;
-use Net::Frame::TCP;
+use Net::Frame::Layer::IPv4;
+use Net::Frame::Layer::TCP;
 
-my $ip4 = Net::Frame::IPv4->new(
+my $ip4 = Net::Frame::Layer::IPv4->new(
    src => $src,
    dst => $target,
 );
-my $tcp = Net::Frame::TCP->new(
+my $tcp = Net::Frame::Layer::TCP->new(
    dst     => $port,
    options => "\x02\x04\x54\x0b",
    payload => 'test',
