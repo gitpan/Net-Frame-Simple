@@ -1,11 +1,11 @@
 #
-# $Id: Simple.pm,v 1.11 2006/12/17 16:30:13 gomor Exp $
+# $Id: Simple.pm,v 1.12 2006/12/21 22:47:51 gomor Exp $
 #
 package Net::Frame::Simple;
 use warnings;
 use strict;
 
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 require Class::Gomor::Array;
 our @ISA = qw(Class::Gomor::Array);
@@ -89,10 +89,9 @@ sub unpack {
       last unless $raw;
 
       my $layer = 'Net::Frame::Layer::'.$encapsulate;
-      (my $module = $layer) =~ s/::/\//g;
-      eval { require "$module.pm" };
+      eval "require $layer";
       if ($@) {
-         print("*** Net::Frame::Layer::$encapsulate module not found.\n".
+         print("*** $layer module not found.\n".
                "*** Either install it (if avail), or implement it.\n".
                "*** You can also send the pcap file to perl\@gomor.org.\n");
                # XXX: use debug feature from Class::Gomor
@@ -158,11 +157,10 @@ sub computeLengths {
             payloadLength => $udp->getLength + $udp->getPayloadLength,
          });
       }
-      elsif (exists $self->[$__ref]->{ICMPv4}) {
-         my $icmp4 = $self->[$__ref]->{ICMPv4};
-         $ip->computeLengths({
-            payloadLength => $icmp4->getLength,
-         });
+      elsif (exists $self->[$__ref]->{ICMPv4}
+         ||  exists $self->[$__ref]->{ICMPv6}) {
+         my $icmp = $self->[$__ref]->{ICMPv4} || $self->[$__ref]->{ICMPv6};
+         $ip->computeLengths({ payloadLength => $icmp->getLength });
       }
    }
 
@@ -194,6 +192,14 @@ sub computeChecksums {
       }
       elsif (exists $self->[$__ref]->{ICMPv4}) {
          $self->[$__ref]->{ICMPv4}->computeChecksums;
+      }
+      elsif (exists $self->[$__ref]->{ICMPv6}) {
+         $self->[$__ref]->{ICMPv6}->computeChecksums({
+            src           => $ip->src,
+            dst           => $ip->dst,
+            nextHeader    => $ip->nextHeader,
+            payloadLength => $ip->payloadLength,
+         });
       }
    }
 
@@ -244,6 +250,7 @@ sub _getPadding {
          last;
       }
       elsif ($l->layer eq 'IPv6') {
+         $tLen += $l->getLength;
          $tLen += $l->getPayloadLength;
          last;
       }
@@ -315,7 +322,7 @@ sub _recv {
    my $layer = $self->[$___canMatchLayer];
 
    for my $this ($oDump->getFramesFor($self)) {
-      next unless $this->[$__timestamp] ge $self->[$__timestamp];
+      next unless $this->[$__timestamp] gt $self->[$__timestamp];
 
       # We must put ICMPv4 before, because the other will 
       # always match for UDP.

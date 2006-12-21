@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:                Net-Frame-Simple
-version:             1.01
+version:             1.02
 abstract:            frame crafting made easy
 license:             Artistic
 generated_by:        ExtUtils::MakeMaker version 6.31
