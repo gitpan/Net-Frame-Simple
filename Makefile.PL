@@ -1,5 +1,5 @@
 #
-# $Id: Makefile.PL,v 1.3 2006/12/09 18:07:11 gomor Exp $
+# $Id: Makefile.PL 296 2008-11-08 16:48:57Z gomor $
 #
 use ExtUtils::MakeMaker;
 
@@ -8,7 +8,7 @@ require v5.6.1;
 WriteMakefile(
    NAME          => 'Net::Frame::Simple',
    VERSION_FROM  => 'lib/Net/Frame/Simple.pm',
-   LICENSE       => 'Artistic',
+   LICENSE       => 'artistic',
    ABSTRACT_FROM => 'lib/Net/Frame/Simple.pm',
    AUTHOR        => 'GomoR <perl@gomor.org>',
    PREREQ_PM     => {

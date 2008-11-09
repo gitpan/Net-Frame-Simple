@@ -1,5 +1,13 @@
 Revision history for Perl extension Net::Frame::Simple.
 
+1.03 Sun Nov  9 22:59:08 CET 2008
+   - new: made computeLengths() and computeChecksums() generic for all protocols
+   - new: $NoComputeLengths and $NoComputeChecksums global variables to disable
+          respective computations
+   - WARNING: this new computation scheme does not apply to:
+              IPv{4|6}, ICMPv{4|6}, TCP, UDP
+     => Because the old computation scheme stills apply.
+
 1.02 Thu Dec 21 23:48:44 CET 2006
    - NEW: support for ICMPv6
    - bugfix: get padding for IPv6

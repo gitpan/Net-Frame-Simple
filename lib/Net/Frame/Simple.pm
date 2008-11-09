@@ -1,15 +1,18 @@
 #
-# $Id: Simple.pm,v 1.12 2006/12/21 22:47:51 gomor Exp $
+# $Id: Simple.pm 303 2008-11-09 22:00:02Z gomor $
 #
 package Net::Frame::Simple;
-use warnings;
-use strict;
+use warnings; use strict;
 
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
-require Class::Gomor::Array;
-our @ISA = qw(Class::Gomor::Array);
-
+use Class::Gomor::Array;
+use Exporter;
+our @ISA = qw(Class::Gomor::Array Exporter);
+our @EXPORT_OK = qw(
+   $NoComputeLengths
+   $NoComputeChecksums
+);
 our @AS = qw(
    raw
    reply
@@ -38,6 +41,9 @@ sub _gettimeofday {
    my ($sec, $usec) = gettimeofday();
    sprintf("%d.%06d", $sec, $usec);
 }
+
+our $NoComputeLengths   = 0;
+our $NoComputeChecksums = 0;
 
 sub new {
    my $self = shift->SUPER::new(
@@ -163,8 +169,14 @@ sub computeLengths {
          $ip->computeLengths({ payloadLength => $icmp->getLength });
       }
    }
+   else {
+      my $layers = $self->[$__layers];
+      for my $l (reverse @$layers) {
+         $l->computeLengths($layers);
+      }
+   }
 
-   1;
+   return 1;
 }
 
 sub computeChecksums {
@@ -202,8 +214,14 @@ sub computeChecksums {
          });
       }
    }
+   else {
+      my $layers = $self->[$__layers];
+      for my $l (reverse @$layers) {
+         $l->computeChecksums($layers);
+      }
+   }
 
-   1;
+   return 1;
 }
 
 sub pack {
@@ -213,8 +231,8 @@ sub pack {
    # the upper will be kept for the reference
    $self->_setRef($_) for @{$self->[$__layers]};
 
-   $self->computeLengths;
-   $self->computeChecksums;
+   $self->computeLengths   unless $NoComputeLengths;
+   $self->computeChecksums unless $NoComputeChecksums;
 
    my $raw = '';
    $raw .= $_->pack for @{$self->[$__layers]};
@@ -566,7 +584,7 @@ Patrice E<lt>GomoRE<gt> Auffret
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 2006, Patrice E<lt>GomoRE<gt> Auffret
+Copyright (c) 2006-2008, Patrice E<lt>GomoRE<gt> Auffret
 
 You may distribute this module under the terms of the Artistic license.
 See LICENSE.Artistic file in the source distribution archive.
