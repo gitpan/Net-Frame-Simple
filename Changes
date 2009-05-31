@@ -1,5 +1,9 @@
 Revision history for Perl extension Net::Frame::Simple.
 
+1.04 Sun May 31 15:29:26 CEST 2009
+   - UPDATE: removed old computation scheme (see 1.03 changes)
+   - update: copyright notice
+
 1.03 Sun Nov  9 22:59:08 CET 2008
    - new: made computeLengths() and computeChecksums() generic for all protocols
    - new: $NoComputeLengths and $NoComputeChecksums global variables to disable

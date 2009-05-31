@@ -1,10 +1,10 @@
 #
-# $Id: Simple.pm 303 2008-11-09 22:00:02Z gomor $
+# $Id: Simple.pm 308 2009-05-31 13:30:08Z gomor $
 #
 package Net::Frame::Simple;
 use warnings; use strict;
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 use Class::Gomor::Array;
 use Exporter;
@@ -37,13 +37,28 @@ use Carp;
 use Time::HiRes qw(gettimeofday);
 use Net::Frame::Layer qw(:consts);
 
+use Net::Frame::Layer::UDP;
+use Net::Frame::Layer::TCP;
+
+our $NoComputeLengths   = 0;
+our $NoComputeChecksums = 0;
+
+$Net::Frame::Layer::UDP::Next->{67}   = 'DHCP';
+$Net::Frame::Layer::UDP::Next->{68}   = 'DHCP';
+$Net::Frame::Layer::UDP::Next->{123}  = 'NTP';
+$Net::Frame::Layer::UDP::Next->{137}  = 'NBNS';
+$Net::Frame::Layer::UDP::Next->{520}  = 'RIPv1';
+$Net::Frame::Layer::UDP::Next->{521}  = 'RIPng';
+$Net::Frame::Layer::UDP::Next->{1985} = 'HSRP';
+$Net::Frame::Layer::UDP::Next->{3544} = 'Teredo';
+
+$Net::Frame::Layer::TCP::Next->{179} = 'BGP';
+$Net::Frame::Layer::TCP::Next->{443} = 'SSL';
+
 sub _gettimeofday {
    my ($sec, $usec) = gettimeofday();
    sprintf("%d.%06d", $sec, $usec);
 }
-
-our $NoComputeLengths   = 0;
-our $NoComputeChecksums = 0;
 
 sub new {
    my $self = shift->SUPER::new(
@@ -100,9 +115,6 @@ sub unpack {
          print("*** $layer module not found.\n".
                "*** Either install it (if avail), or implement it.\n".
                "*** You can also send the pcap file to perl\@gomor.org.\n");
-               # XXX: use debug feature from Class::Gomor
-               #"*** You can also send the pcap file to perl\@gomor.org.\n".
-               #"*** ERROR: $@\n");
 
          if ($prevLayer) {
             $prevLayer->nextLayer(NF_LAYER_NOT_AVAILABLE);
@@ -146,81 +158,19 @@ sub unpack {
 
 sub computeLengths {
    my $self = shift;
-
-   if (exists $self->[$__ref]->{IPv4} || exists $self->[$__ref]->{IPv6}) {
-      my $ip = $self->[$__ref]->{IPv4} || $self->[$__ref]->{IPv6};
-      if (exists $self->[$__ref]->{TCP}) {
-         my $tcp = $self->[$__ref]->{TCP};
-         $tcp->computeLengths;
-         $ip->computeLengths({
-            payloadLength => $tcp->getLength + $tcp->getPayloadLength,
-         });
-      }
-      elsif (exists $self->[$__ref]->{UDP}) {
-         my $udp = $self->[$__ref]->{UDP};
-         $udp->computeLengths;
-         $ip->computeLengths({
-            payloadLength => $udp->getLength + $udp->getPayloadLength,
-         });
-      }
-      elsif (exists $self->[$__ref]->{ICMPv4}
-         ||  exists $self->[$__ref]->{ICMPv6}) {
-         my $icmp = $self->[$__ref]->{ICMPv4} || $self->[$__ref]->{ICMPv6};
-         $ip->computeLengths({ payloadLength => $icmp->getLength });
-      }
+   my $layers = $self->[$__layers];
+   for my $l (reverse @$layers) {
+      $l->computeLengths($layers);
    }
-   else {
-      my $layers = $self->[$__layers];
-      for my $l (reverse @$layers) {
-         $l->computeLengths($layers);
-      }
-   }
-
    return 1;
 }
 
 sub computeChecksums {
    my $self = shift;
-
-   if (exists $self->[$__ref]->{IPv4} || exists $self->[$__ref]->{IPv6}) {
-      my $ip = $self->[$__ref]->{IPv4} || $self->[$__ref]->{IPv6};
-      if (exists $self->[$__ref]->{ETH}) {
-         $ip->computeChecksums;
-      }
-
-      if (exists $self->[$__ref]->{TCP}) {
-         $self->[$__ref]->{TCP}->computeChecksums({
-            type => $ip->layer,
-            src  => $ip->src,
-            dst  => $ip->dst,
-         });
-      }
-      elsif (exists $self->[$__ref]->{UDP}) {
-         $self->[$__ref]->{UDP}->computeChecksums({
-            type => $ip->layer,
-            src  => $ip->src,
-            dst  => $ip->dst,
-         });
-      }
-      elsif (exists $self->[$__ref]->{ICMPv4}) {
-         $self->[$__ref]->{ICMPv4}->computeChecksums;
-      }
-      elsif (exists $self->[$__ref]->{ICMPv6}) {
-         $self->[$__ref]->{ICMPv6}->computeChecksums({
-            src           => $ip->src,
-            dst           => $ip->dst,
-            nextHeader    => $ip->nextHeader,
-            payloadLength => $ip->payloadLength,
-         });
-      }
+   my $layers = $self->[$__layers];
+   for my $l (reverse @$layers) {
+      $l->computeChecksums($layers);
    }
-   else {
-      my $layers = $self->[$__layers];
-      for my $l (reverse @$layers) {
-         $l->computeChecksums($layers);
-      }
-   }
-
    return 1;
 }
 
@@ -235,7 +185,14 @@ sub pack {
    $self->computeChecksums unless $NoComputeChecksums;
 
    my $raw = '';
-   $raw .= $_->pack for @{$self->[$__layers]};
+   my $last;
+   for (@{$self->[$__layers]}) {
+      $raw .= $_->pack;
+      $last = $_;
+   }
+   if ($last && defined($last->payload)) {
+      $raw .= $last->payload;
+   }
 
    $raw .= $self->[$__padding] if $self->[$__padding];
 
@@ -253,13 +210,13 @@ sub _getPadding {
    my $last = ${$self->[$__layers]}[-1];
 
    # Last layer has no payload, so no padding
-   return unless $last->payload;
+   return if (! defined($last->payload) || ! length($last->payload));
 
-   # If last layer has unknown layer payload, we do not 
-   # try to get padding
-   if ($last->nextLayer eq NF_LAYER_NOT_AVAILABLE) {
-      return;
-   }
+   # FIX: be it available or not, we need to parse payload/padding difference
+   #      So, I comment these lines for now
+   #if ($last->nextLayer eq NF_LAYER_NOT_AVAILABLE) {
+      #return;
+   #}
 
    my $tLen = 0;
    for my $l (@{$self->[$__layers]}) {
@@ -584,7 +541,7 @@ Patrice E<lt>GomoRE<gt> Auffret
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 2006-2008, Patrice E<lt>GomoRE<gt> Auffret
+Copyright (c) 2006-2009, Patrice E<lt>GomoRE<gt> Auffret
 
 You may distribute this module under the terms of the Artistic license.
 See LICENSE.Artistic file in the source distribution archive.
