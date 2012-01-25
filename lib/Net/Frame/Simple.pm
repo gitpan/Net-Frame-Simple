@@ -1,10 +1,10 @@
 #
-# $Id: Simple.pm 308 2009-05-31 13:30:08Z gomor $
+# $Id: Simple.pm 345 2012-01-25 21:48:03Z gomor $
 #
 package Net::Frame::Simple;
 use warnings; use strict;
 
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
 use Class::Gomor::Array;
 use Exporter;
@@ -42,18 +42,6 @@ use Net::Frame::Layer::TCP;
 
 our $NoComputeLengths   = 0;
 our $NoComputeChecksums = 0;
-
-$Net::Frame::Layer::UDP::Next->{67}   = 'DHCP';
-$Net::Frame::Layer::UDP::Next->{68}   = 'DHCP';
-$Net::Frame::Layer::UDP::Next->{123}  = 'NTP';
-$Net::Frame::Layer::UDP::Next->{137}  = 'NBNS';
-$Net::Frame::Layer::UDP::Next->{520}  = 'RIPv1';
-$Net::Frame::Layer::UDP::Next->{521}  = 'RIPng';
-$Net::Frame::Layer::UDP::Next->{1985} = 'HSRP';
-$Net::Frame::Layer::UDP::Next->{3544} = 'Teredo';
-
-$Net::Frame::Layer::TCP::Next->{179} = 'BGP';
-$Net::Frame::Layer::TCP::Next->{443} = 'SSL';
 
 sub _gettimeofday {
    my ($sec, $usec) = gettimeofday();
@@ -109,17 +97,16 @@ sub unpack {
    for (1..1000) {
       last unless $raw;
 
+      $encapsulate =~ s/[^-:\w]//g; # Fix potential code injection
       my $layer = 'Net::Frame::Layer::'.$encapsulate;
       eval "require $layer";
       if ($@) {
          print("*** $layer module not found.\n".
                "*** Either install it (if avail), or implement it.\n".
                "*** You can also send the pcap file to perl\@gomor.org.\n");
-
          if ($prevLayer) {
             $prevLayer->nextLayer(NF_LAYER_NOT_AVAILABLE);
          }
-
          last;
       }
       my $l = $layer->new(raw => $raw)->unpack
@@ -235,10 +222,13 @@ sub _getPadding {
    # No padding
    return if $rawLength == $tLen;
 
-   my $pLen    = ($rawLength > $tLen) ? ($rawLength - $tLen) : 0;
-   my $padding = substr($self->[$__raw], $tLen, $pLen);
-
-   $self->[$__padding] = $padding;
+   my $pLen = 0;
+   my $padding;
+   if ($rawLength > $tLen) {
+      $pLen    = $rawLength - $tLen;
+      $padding = substr($self->[$__raw], $tLen, $pLen);
+      $self->[$__padding] = $padding;
+   }
 
    # Now, split padding between true padding and true payload
    my $payloadLength = length($last->payload);
@@ -320,7 +310,7 @@ sub recv {
    my $self = shift;
    my ($oDump) = @_;
 
-   # We already have the reply
+   # We already have the reply
    $self->[$__reply] and return $self->[$__reply];
 
    # Is there anything waiting ?
@@ -541,7 +531,7 @@ Patrice E<lt>GomoRE<gt> Auffret
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (c) 2006-2009, Patrice E<lt>GomoRE<gt> Auffret
+Copyright (c) 2006-2012, Patrice E<lt>GomoRE<gt> Auffret
 
 You may distribute this module under the terms of the Artistic license.
 See LICENSE.Artistic file in the source distribution archive.

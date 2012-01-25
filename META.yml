@@ -1,15 +1,23 @@
 --- #YAML:1.0
-name:                Net-Frame-Simple
-version:             1.04
-abstract:            frame crafting made easy
-license:             artistic
-author:              
+name:               Net-Frame-Simple
+version:            1.05
+abstract:           frame crafting made easy
+author:
     - GomoR <gomor-cpan_at_gomor.org>
-generated_by:        ExtUtils::MakeMaker version 6.42
-distribution_type:   module
-requires:     
-    Class::Gomor:                  1.00
-    Net::Frame:                    0
+license:            artistic
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
+requires:
+    Class::Gomor:  1.00
+    Net::Frame:    0
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.57_05
 meta-spec:
-    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
-    version: 1.3
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4
